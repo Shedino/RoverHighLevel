@@ -1,0 +1,18 @@
+<launch>
+  <arg name="host" default="192.168.0.1" />
+  <master auto="start"/>
+  <node pkg="lms1xx" name="lms1xx" type="LMS1xx_node" output="screen">
+  <param name="host" value="$(arg host)" />
+  </node>
+  <node pkg="joy" name="joy_node" type="joy_node" output="screen">
+  </node>
+  <node pkg="robot_setup_tf" name="tf_broadcaster" type="tf_broadcaster" output="screen">
+  </node>
+  <node pkg="donkey_rover" name="rover_odom" type="rover_odom" output="screen">
+  </node>
+  <!-- Launching the IMU sensor -->
+  <!--node pkg="xsens_driver" name="mtnode.py" type="mtnode.py" respawn="true" output="screen"-->
+  <!--param name="frame_id" value="base_link" /-->
+  <!--remap from="/mti/sensor/imu" to="imu_data" /--> 
+  <!--/node-->
+</launch>
