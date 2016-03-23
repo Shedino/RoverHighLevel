@@ -9,10 +9,17 @@
   <node pkg="robot_setup_tf" name="tf_broadcaster" type="tf_broadcaster" output="screen">
   </node>
   <node pkg="donkey_rover" name="rover_odom" type="rover_odom" output="screen">
+  </node>  
+
+  <param name="/use_sim_time" value="false"/>
+
+  <!-- Publishes the voxel grid to rviz for display -->
+  <node pkg="costmap_2d" type="costmap_2d_markers" name="voxel_visualizer">
+    <remap from="voxel_grid" to="costmap/voxel_grid"/>
   </node>
-  <!-- Launching the IMU sensor -->
-  <!--node pkg="xsens_driver" name="mtnode.py" type="mtnode.py" respawn="true" output="screen"-->
-  <!--param name="frame_id" value="base_link" /-->
-  <!--remap from="/mti/sensor/imu" to="imu_data" /--> 
-  <!--/node-->
+
+  <!-- Run the costmap node -->
+  <node name="costmap_node" pkg="costmap_2d" type="costmap_2d_node" >
+    <rosparam file="$(find costmap_2d)/launch/example_params.yaml" command="load" ns="costmap" />
+  </node>
 </launch>

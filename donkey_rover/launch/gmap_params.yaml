@@ -1,7 +1,0 @@
-srr: 0.15
-srt: 0.25
-str: 0.1
-stt: 0.3
-linearUpdate: 0.3
-angularUpdate: 0.1
-temporalUpdate: 0.5

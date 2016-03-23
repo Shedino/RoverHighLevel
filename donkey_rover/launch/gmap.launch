@@ -1,5 +1,4 @@
  <launch> 
-  <node pkg="gmapping" name="slam_gmapping" type="slam_gmapping" args="scan:=scan" respawn="true" output="screen">
-  <rosparam file="$(find donkey_rover)/launch/gmap_params.yaml" command="load" />
+   <node pkg="gmapping" name="slam_gmapping" type="slam_gmapping" args="scan:=scan" respawn="true" output="screen">
   </node>
 </launch> 

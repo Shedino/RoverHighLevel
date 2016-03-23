@@ -232,7 +232,7 @@ def moveTo(argv):
     if len(argv) < 4:
         sys.stderr.write("Usage: donkeyMoveToPose %s {mode} [0 = local cartesian frame;1 = fake GPS] {Localization.active} [bool] {X} [m] {Y} [m] {Theta} [rad] \n ex.:\n rosrun donkeyMoveToPose %s False False 0.5 0.0 0.5 \n\n rosrun donkeyMoveToPose %s True False 49.56789 11.45677 \n\n" % (os.path.basename(argv[0]),os.path.basename(argv[0]),os.path.basename(argv[0])))
         return 2
-# TODO: da perfezionare la logica di errore riportata sotto
+# TODO: da perfezionare la logica di errore riportata sotto e quella sopra
 #    if(argv[1]!="True" and argv[1]!="False"):
 #        sys.stderr.write("The 1th argument must be False or True \n\n")
 #        return 3

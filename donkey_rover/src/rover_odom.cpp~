@@ -1,148 +1,393 @@
 #include <ros/ros.h>
 #include <tf/transform_broadcaster.h>
+#include <geometry_msgs/Twist.h>
 #include <nav_msgs/Odometry.h>
 #include "libRover.h"
 #include <sensor_msgs/Joy.h>
+#include <math.h>
+#include "donkey_rover/Rover_Data.h"
+#include "donkey_rover/Rover_Track_Speed.h"
+#include "donkey_rover/Rover_Track_Bogie_Angle.h"
+#include "donkey_rover/Rover_Scanner.h"
+#include "donkey_rover/Rover_Power_Data.h" 
+//#include <custom_msgs/velocityEstimate.h>
+
 Rover rover(false);
-float V1;
-float V2;
-void joyCallback(const sensor_msgs::JoyConstPtr& joy)
+EScannerState state;
+float VX = 0.0;
+float VY = 0.0;
+
+
+
+class DonkeyRoverClass
 {
-  
-
-  float v=joy->axes[1];
-  float vth=joy->axes[2];
-  float a1=joy->buttons[4];
-  v= v*(a1+1)/2;
-  V1 = v;
-  V2 = vth;
-  int retCode = rover.setSpeedVO (v, vth);
-  //cout << "RETCODE" << retCode << endl << endl;
-    if (retCode != 0)
+	public:
+		
+		DonkeyRoverClass(ros::NodeHandle& node)
 		{
-     	// Failed to set the speed
-		ROS_INFO("Failed to set speed of the rover");
-  }
+			n_=node;
 
-  
-}
-int main(int argc, char** argv){
-  ros::init(argc, argv, "odometry_publisher");
+			//subscribers
+			subFromJoystick_ 		= n_.subscribe("joy", 1, &DonkeyRoverClass::joyCallback,this);
+			subFromCMDVEL_ 			= n_.subscribe("cmd_vel", 1, &DonkeyRoverClass::CMDVELLCommander,this);
+			subFromScannerCommander_ 	= n_.subscribe("c1", 10, &DonkeyRoverClass::ScannerCommander,this);
+			//subFromIMUSpeed_= n_.subscribe("mti/filter/velocity", 10, &DonkeyRoverClass::imuspeed,this);
+			subFromRightLeftCommands_	= n_.subscribe("speedfollow", 5, &DonkeyRoverClass::RLcommander,this);
 
-  ros::NodeHandle n;
-  ros::Publisher odom_pub = n.advertise<nav_msgs::Odometry>("odom", 50);
-  tf::TransformBroadcaster odom_broadcaster;
-  
+			// publishers
+			odom_pub 	   	  = n_.advertise<nav_msgs::Odometry>("odom", 100);
+			twist_pub 	  	  = n_.advertise<geometry_msgs::Twist>("twist", 100);
+			Rover_Track_Speed_pub     = n_.advertise<donkey_rover::Rover_Track_Speed>("RoverTrackSpeed", 100);
+			Rover_Track_Angles_pub    = n_.advertise<donkey_rover::Rover_Track_Bogie_Angle>("RoverAngles", 100);	
+		}
 
-  float x = 0.0;
-  float y = 0.0;
-  float th = 0.0;
-  float v;
-//  float omega;
 
-  /* ROVER INITIALIZATION */
-  
-  
-  
-  int retCode = rover.init();
-  if (retCode != 0)
+		// Global Varriables of the Class
+
+
+		// Subscriber callbacks
+		/*
+		void imuspeed(const custom_msgs::velocityEstimate::ConstPtr& speed){
+    			custom_msgs::velocityEstimate s = *speed;
+    			VX = s.velE;
+    			VY = s.velN;
+		}*/
+
+		void RLcommander(const geometry_msgs::Vector3::ConstPtr& s)
 		{
-     	// Failed to init the rover
-		return -1;
-  }
-    EScannerState state;
-    retCode = rover.getScannerState(state);
-    while (state != ESSIdle)
-    {
-        cout << '.' << flush;
-        Time::sleep(1, 0);
-        retCode = rover.getScannerState(state);
-    }
-  
-  
-  float vx = 0.1;
-  float vy = -0.1;
-  float vth;
-  
+  			geometry_msgs::Vector3 speed = *s;
+  			float VL = speed.y;
+  			float VR = speed.x;
+  			int retCode = rover.setSpeed (VL,VR);
+  			if (retCode != 0)
+    			 	{
+     			   // Failed to set the speed
+     			   ROS_ERROR("Failed to move the rover to follow");
+  			 }
+		}
 
-  ros::Time current_time, last_time;
-  current_time = ros::Time::now();
-  last_time = ros::Time::now();
-//printf(" speed is %f ",vx);
-  ros::Rate r(100.0);
-  ros::Subscriber sub = n.subscribe<sensor_msgs::Joy>("joy", 1, joyCallback);
-  while(n.ok()){
-    
-    Time timestamp;
-    ros::spinOnce();               // check for incoming messages
-    current_time = ros::Time::now();
-    // MY ADDED CODE
-    /*int retCode = rover.getSpeedVO(timestamp, v, omega);
-    printf(" retCode  is %d, speed is  %f \n ",retCode,v);
-    if (retCode != 0)
+		void ScannerCommander(const geometry_msgs::Vector3::ConstPtr& vector)
 		{
-     	// Failed to read the rover speed
-		ROS_INFO("Failed to read the rover speed");
-		return -1;
-    }
-    vth = omega;
-    */
-    v = V1;
-    vth = V2;
-    vx = v * cos(th);    
-    vy = v * sin(th);
+ 			 geometry_msgs::Vector3 new_correction = *vector;
+  			 float msg = new_correction.z;
+  			 int retCode;
+ 			 if (msg ==1 ){
+    				  while (state != ESSIdle)
+     			 	  {
+       					cout << '.' << flush;
+       					Time::sleep(1, 0);
+       					retCode = rover.getScannerState(state);
+     				  }
+     			 	  retCode = rover.sendScannerCommand(ESCDoHoming);
+      			 	  if (retCode != 0)
+      		 	  	  {
+        		  	       printError("GoHome failed", retCode);
 
-    //compute odometry in a typical way given the velocities of the robot
-    float dt = (current_time - last_time).toSec();
-    float delta_x = (vx * cos(th) - vy * sin(th)) * dt;
-    float delta_y = (vx * sin(th) + vy * cos(th)) * dt;
-    float delta_th = vth * dt;
-//DEBUG
-//    delta_x = vx * dt;
-//    delta_y = vy * dt;
-// DEBUG END
-    x += delta_x;
-    y += delta_y;
-    th += delta_th;
+      				  }
+  			 } else if(msg == 2)
+  			 {
+     			 	while (state != ESSIdle)
+      				{
+       					cout << '.' << flush;
+       					Time::sleep(1, 0);
+       					retCode = rover.getScannerState(state);
+      			 	}
+      			 	retCode = rover.sendScannerCommand(ESCStart);
+      			 	if (retCode != 0)
+      			 	{
+       		         		printError("Starting failed", retCode);
 
-    //since all odometry is 6DOF we'll need a quaternion created from yaw
-    geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(th);
+     				 }
+  			} else if(msg == 3)
+  			{
+      				retCode = rover.sendScannerCommand(ESCStop);
+      				if (retCode != 0)
+      				{
+       					printError("Stopping failed", retCode);
 
-    //first, we'll publish the transform over tf
-    geometry_msgs::TransformStamped odom_trans;
-    odom_trans.header.stamp = current_time;
-    odom_trans.header.frame_id = "odom";
-    odom_trans.child_frame_id = "base_footprint";
+      				}
+  			} else if (msg == 4)
+  			{
+     				retCode = rover.init();
 
-    odom_trans.transform.translation.x = x;
-    odom_trans.transform.translation.y = y;
-    odom_trans.transform.translation.z = 0.0;
-    odom_trans.transform.rotation = odom_quat;
+  			}else
+  			{
+      			//printf(" \n Command is not recognized, recognized commands are GoHome, Start and Stop : \n");
 
-    //send the transform
-    odom_broadcaster.sendTransform(odom_trans);
+  			}
 
-    //next, we'll publish the odometry message over ROS
-    nav_msgs::Odometry odom;
-    odom.header.stamp = current_time;
-    odom.header.frame_id = "odom";
+		}
 
-    //set the position
-    odom.pose.pose.position.x = x;
-    odom.pose.pose.position.y = y;
-    odom.pose.pose.position.z = 0.0;
-    odom.pose.pose.orientation = odom_quat;
 
-    //set the velocity
-    odom.child_frame_id = "base_footprint";
-    odom.twist.twist.linear.x = vx;
-    odom.twist.twist.linear.y = vy;
-    odom.twist.twist.angular.z = vth;
+		void CMDVELLCommander(const geometry_msgs::Twist::ConstPtr& vel)
+		{
+  			geometry_msgs::Twist new_vel = *vel;
+  			float v = sqrt (new_vel.linear.x * new_vel.linear.x + new_vel.linear.y * new_vel.linear.y);
+  			float vth = new_vel.angular.z;
+  			int retCode = rover.setSpeedVO (v, vth);
+    			if (retCode != 0)
+       			 {
+        		// Failed to set the speed
+        		ROS_ERROR("Failed to set speed of the rover");
+ 		 	}
 
-    //publish the message
-    odom_pub.publish(odom);
+		}
 
-    last_time = current_time;
-    r.sleep();
-  }
+		void joyCallback(const sensor_msgs::JoyConstPtr& joy)
+		{
+  			float v=joy->axes[1];
+  			float vth=joy->axes[2];
+ 		        float a1=joy->buttons[4];
+  			v= v*(a1+1)/2;
+  			int retCode = rover.setSpeedVO (v, vth);
+    			if (retCode != 0)
+			{
+     				// Failed to set the speed
+				ROS_ERROR("Failed to set speed of the rover");
+  			}
+  
+		}
+
+		// Class Functions
+		void Scanner_Handle()
+		{
+			float syncf = 100.0;
+    			EScannerState state;
+    			int retCode = rover.getScannerState(state);
+    			while (state != ESSIdle)
+    				{
+        			cout << '.' << flush;
+        			Time::sleep(1, 0);
+        			retCode = rover.getScannerState(state);
+   			 }
+
+  			retCode = rover.setSyncFreq(syncf);
+  			if (retCode != 0)
+        			{
+        			// Failed to set sync frequency
+        			printf("Failed to set sync frequency to %f",syncf);
+  			}
+  			retCode = rover.setScannerPeriod(2);
+  			if (retCode != 0)
+  			{
+      				ROS_ERROR("setScannerPeriod failed");
+  			}
+
+		}
+
+		void Rover_Handle()
+		{
+  			int retCode = rover.init();
+  			if (retCode != 0)
+			{
+				ROS_ERROR("Failed Initialize the Rover");
+  			}
+		}
+		
+		void RoverDataProvider()
+		{
+			Time timestamp;
+			float temp_Front_Left_Track_Speed;
+			float temp_Front_Right_Track_Speed;
+			float temp_Rear_Left_Track_Speed;
+			float temp_Rear_Right_Track_Speed;
+
+			float temp_Front_Left_Track_Angle;
+			float temp_Front_Right_Track_Angle;
+			float temp_Rear_Left_Track_Angle;
+			float temp_Rear_Right_Track_Angle;
+			float temp_Rear_Bogie_Angle;
+			int retCode; 
+			retCode = rover.getSpeedInMPerS(timestamp,
+				  temp_Front_Left_Track_Speed, temp_Front_Right_Track_Speed,
+				  temp_Rear_Left_Track_Speed,  temp_Rear_Right_Track_Speed  );
+  			if (retCode != 0)
+			{
+				ROS_ERROR("Failed to Read Speed of Tracks, Try to Restart the Rover");
+  			}
+			retCode = rover.getAngles(timestamp,
+				  temp_Front_Left_Track_Angle, temp_Front_Right_Track_Angle,
+				  temp_Rear_Left_Track_Angle,  temp_Rear_Right_Track_Angle,
+				  temp_Rear_Bogie_Angle);
+  			if (retCode != 0)
+			{
+				ROS_ERROR("Failed to Read Angle of Tracks, Try to Restart the Rover");
+  			}
+			//retCode = 
+			//outputScanner  To be done
+			outputTrackSpeed.Front_Left_Track_Speed	  = temp_Front_Left_Track_Speed;
+			outputTrackSpeed.Front_Right_Track_Speed  = temp_Front_Right_Track_Speed;
+			outputTrackSpeed.Rear_Left_Track_Speed    = temp_Rear_Left_Track_Speed;
+			outputTrackSpeed.Rear_Right_Track_Speed   = temp_Rear_Right_Track_Speed;
+			
+			outputBogieAngle.Front_Left_Track_Angle   = temp_Front_Left_Track_Angle;
+			outputBogieAngle.Front_Right_Track_Angle  = temp_Front_Right_Track_Angle;
+			outputBogieAngle.Rear_Left_Track_Angle    = temp_Rear_Left_Track_Angle;
+			outputBogieAngle.Rear_Right_Track_Angle   = temp_Rear_Right_Track_Angle;
+			outputBogieAngle.Rear_Bogie_Angle         = temp_Rear_Bogie_Angle;
+ 
+			Rover_Track_Speed_pub.publish(outputTrackSpeed); 
+			Rover_Track_Angles_pub.publish(outputBogieAngle);
+		}
+
+                void Odometry_Handle()
+		{
+  			float x = 0.0;
+  			float y = 0.0;
+  			float th = 0.0;
+  			float v;
+ 		        
+  			float vx = 0.1;
+  			float vy = -0.1;
+ 		 	float vth;
+  			float v_left;
+  			float v_left2;
+  			float v_right;
+  			float v_right2;
+  			int count = 0;
+			int retCode;
+  			ros::Time current_time, last_time;
+  			current_time = ros::Time::now();
+  			last_time = ros::Time::now();
+			ros::Rate loop_rate(rate);
+  			while(ros::ok()){
+    				
+    				Time timestamp;
+    				ros::spinOnce();               // check for incoming messages
+    				current_time = ros::Time::now();
+    				// Reading speed of the rover
+    				retCode = rover.getSpeedInMPerS(timestamp, v_left, v_right, v_left2, v_right2);
+
+    				if (retCode != 0)
+        			{
+        				// Failed to read the rover speed
+        				ROS_ERROR("Failed to read the Righ_left speed");
+    				}
+
+    				retCode = rover.getSpeedVO(timestamp, v, vth);
+    				if (retCode != 0)
+				{
+     					// Failed to read the rover speed
+					ROS_ERROR("Failed to read the rover speed");
+   				 }
+
+    				/*if ((count>50) && ((v > 0.01) || (vth > 0.01) || (vth < -0.01)))
+        				{
+        				printf("Front left speed is   %f   while rear left speed is   %f   \n", v_left, v_left2);
+        				printf("Front right speed is   %f   while rear right speed is   %f   \n .. \n .. \n .. \n", v_right, v_right2);
+
+    				}*/
+
+    				//Apply correction on Odometry data
+    				v = v;
+    				vth= vth;
+    				// Correction applied
+    				vx = v * cos(th);    
+    				vy = v * sin(th);
+
+
+
+    				//compute odometry in a typical way given the velocities of the robot
+    				float dt = (current_time - last_time).toSec();
+    				float delta_x = (vx * cos(th) - vy * sin(th)) * dt;
+    				float delta_y = (vx * sin(th) + vy * cos(th)) * dt;
+    				float delta_th = vth * dt;
+				//DEBUG
+    				delta_x = vx * dt;
+    				delta_y = vy * dt;
+				// DEBUG END
+    				x += delta_x;
+    				y += delta_y;
+    				th += delta_th;
+    				//since all odometry is 6DOF we'll need a quaternion created from yaw
+    				geometry_msgs::Quaternion odom_quat = tf::createQuaternionMsgFromYaw(th);
+
+    				//first, we'll publish the transform over tf
+    				geometry_msgs::TransformStamped odom_trans;
+    				odom_trans.header.stamp = current_time;
+    				odom_trans.header.frame_id = "odom";
+    				odom_trans.child_frame_id = "dummy";
+
+    				odom_trans.transform.translation.x = x;
+   				odom_trans.transform.translation.y = y;
+    				odom_trans.transform.translation.z = 0.0;
+    				odom_trans.transform.rotation = odom_quat;
+
+    				//send the transform
+    				odom_broadcaster.sendTransform(odom_trans);
+
+    				//next, we'll publish the odometry message over ROS
+    				//nav_msgs::Odometry odom;
+    				odom.header.stamp = current_time;
+   	 			odom.header.frame_id = "odom";
+    				//geometry_msgs::Twist tw;
+
+    				//set the position
+    				odom.pose.pose.position.x = x;
+    				odom.pose.pose.position.y = y;
+    				odom.pose.pose.position.z = 0.0;
+    				odom.pose.pose.orientation = odom_quat;
+
+    				//set the velocity
+    				odom.child_frame_id = "base_link";
+    				odom.twist.twist.linear.x = vx;
+    				odom.twist.twist.linear.y = vy;
+    				odom.twist.twist.angular.z = vth;
+    				tw.linear.x = VX;
+    				tw.linear.y = VY;
+
+    				//publish the message
+    				odom_pub.publish(odom);
+    				twist_pub.publish(tw);
+
+    				last_time = current_time;
+    				count ++;
+				loop_rate.sleep();
+  				}
+		}
+				
+		
+
+	protected:
+		/*state here*/
+		ros::NodeHandle n_;
+
+		// Subscribers
+		ros::Subscriber subFromJoystick_;
+		ros::Subscriber subFromCMDVEL_;
+		ros::Subscriber subFromScannerCommander_;
+		//ros::Subscriber subFromIMUSpeed_;
+	        ros::Subscriber subFromRightLeftCommands_;
+
+		// Publishers
+		ros::Publisher odom_pub;
+		ros::Publisher twist_pub;
+		ros::Publisher Rover_Track_Speed_pub;
+		ros::Publisher Rover_Track_Angles_pub;
+		nav_msgs::Odometry odom;
+		tf::TransformBroadcaster odom_broadcaster;
+		geometry_msgs::Twist tw;
+		donkey_rover::Rover_Track_Speed outputTrackSpeed;
+		donkey_rover::Rover_Scanner outputScanner;
+		donkey_rover::Rover_Track_Bogie_Angle outputBogieAngle;
+		donkey_rover::Rover_Power_Data outputPower;
+
+		int rate = 100;
+
+	private:
+};
+
+int main(int argc, char **argv)
+{
+	ros::init(argc, argv, "donkey_rover");
+	ros::NodeHandle node;
+
+	DonkeyRoverClass DonkeyRoverNode(node);
+
+	DonkeyRoverNode.Rover_Handle();
+	
+	DonkeyRoverNode.Scanner_Handle();
+	DonkeyRoverNode.RoverDataProvider();
+	DonkeyRoverNode.Odometry_Handle();
+	return 0;
 }
